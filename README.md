@@ -8,7 +8,7 @@ A **read-only Windows disk analyzer** built in **Go** with a professionally styl
 
 ## Download and run
 
-Download the latest Windows build from the [Actions workflow artifacts](../../actions/workflows/windows.yml) (after a successful run), or compile directly from source:
+Download the portable Windows x64 executable from [GitHub Releases](../../releases/latest). No installation is required. The release also includes `SHA256SUMS.txt` for integrity verification. Development builds remain available from [Actions workflow artifacts](../../actions/workflows/windows.yml). Alternatively, compile directly from source:
 
 ```powershell
 # Windows 10/11, Go 1.23+ (no Python, Node.js, CMake, or third-party Go modules)
@@ -75,7 +75,7 @@ Build a Windows executable from Linux (cross-compilation):
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -H windowsgui' -o StorageScout.exe .
 ```
 
-CI runs the Go tests and builds the Windows executable, publishing it as a workflow artifact. CI does **not** exercise Windows Explorer or Edge app-mode launch. Test the compiled executable on Windows before treating the app as fully platform-qualified.
+CI runs the Go tests and builds the Windows executable, publishing it as a workflow artifact. The [release workflow](../../actions/workflows/release.yml) additionally runs tests and vet before publishing a versioned portable executable and SHA-256 checksum. To publish a new version, run that workflow from `main` with an unused `vMAJOR.MINOR.PATCH` version or push a new version tag. Existing releases are not overwritten. CI does **not** exercise Windows Explorer or Edge app-mode launch. Test the compiled executable on Windows before treating the app as fully platform-qualified.
 
 ## Privacy and safety
 
