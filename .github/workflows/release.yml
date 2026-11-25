@@ -1,0 +1,111 @@
+name: Publish Windows release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag (e.g. v0.1.1); run from main'
+        required: true
+        default: 'v0.1.0'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-scout-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build portable executable
+        run: go build -trimpath -ldflags "-s -w -H windowsgui" -o StorageScout.exe .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StorageScout-Windows-x64
+          path: StorageScout.exe
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: StorageScout-Windows-x64
+          path: dist
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            version="${REQUESTED_VERSION:-v0.1.0}"
+          else
+            echo "Run releases from main or a version tag." >&2
+            exit 1
+          fi
+
+          if [[ ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Expected a stable version tag such as v0.1.0." >&2
+            exit 1
+          fi
+
+          if gh release view "$version" >/dev/null 2>&1; then
+            if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_TYPE" == branch ]]; then
+              echo "Initial release $version already exists; leaving it unchanged."
+              exit 0
+            fi
+            echo "Release $version already exists; choose a new version." >&2
+            exit 1
+          fi
+
+          cd dist
+          test -s StorageScout.exe
+          mv StorageScout.exe "StorageScout-$version-Windows-x64.exe"
+          sha256sum "StorageScout-$version-Windows-x64.exe" > SHA256SUMS.txt
+
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tag_args=(--verify-tag)
+          else
+            # Never attach binaries from this commit to a pre-existing tag.
+            existing_tags="$(gh api "repos/$GH_REPO/git/matching-refs/tags/$version" --jq '.[].ref')"
+            if grep -Fxq "refs/tags/$version" <<< "$existing_tags"; then
+              echo "Tag $version already exists; release that tag instead." >&2
+              exit 1
+            fi
+            tag_args=(--target "$GITHUB_SHA")
+          fi
+
+          gh release create "$version" \
+            "StorageScout-$version-Windows-x64.exe" SHA256SUMS.txt \
+            "${tag_args[@]}" --title "Storage Scout $version" --generate-notes
